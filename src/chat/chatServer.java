@@ -14,7 +14,6 @@ public class chatServer {
     private static JTextArea logArea;
 
     public static void main(String[] args) {
-
         SwingUtilities.invokeLater(() -> createGUI());
 
         try (ServerSocket serverSocket = new ServerSocket(6000)) {
@@ -40,7 +39,7 @@ public class chatServer {
     }
 
     private static void createGUI() {
-        frame = new JFrame("Serveur Chat TCP (Images + Privé)");
+        frame = new JFrame("Serveur Chat TCP (Texte + Image + Fichier + Privé)");
         frame.setSize(600, 500);
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 
@@ -53,22 +52,17 @@ public class chatServer {
     }
 
     public static void broadcastText(String msg, ClientHandler sender) {
-        for (ClientHandler c : clients) {
-            if (c != sender) {
-                c.sendText("MSG:" + msg);
-            }
+        for (ClientHandler client : clients) {
+            if (client != sender) client.sendText("MSG:" + msg);
         }
     }
 
     private static void updateUsersList() {
         StringBuilder sb = new StringBuilder();
-        for (ClientHandler c : clients)
-            sb.append(c.username).append(",");
-
+        for (ClientHandler client : clients) sb.append(client.username).append(",");
+        if (sb.length() > 0) sb.setLength(sb.length() - 1);
         String list = "USERS:" + sb.toString();
-
-        for (ClientHandler c : clients)
-            c.sendText(list);
+        for (ClientHandler client : clients) client.sendText(list);
     }
 
     static class ClientHandler extends Thread {
@@ -76,12 +70,10 @@ public class chatServer {
         private Socket socket;
         private DataInputStream in;
         private DataOutputStream out;
-
         public String username;
 
         public ClientHandler(Socket socket) {
             this.socket = socket;
-
             try {
                 in = new DataInputStream(socket.getInputStream());
                 out = new DataOutputStream(socket.getOutputStream());
@@ -91,12 +83,8 @@ public class chatServer {
         }
 
         public void sendText(String msg) {
-            try {
-                out.writeUTF(msg);
-                out.flush();
-            } catch (Exception e) {
-                log("Erreur envoi texte à " + username);
-            }
+            try { out.writeUTF(msg); out.flush(); }
+            catch (Exception e) { log("Erreur envoi texte à " + username); }
         }
 
         public void sendImage(byte[] img, String sender) {
@@ -105,9 +93,16 @@ public class chatServer {
                 out.writeInt(img.length);
                 out.write(img);
                 out.flush();
-            } catch (Exception e) {
-                log("Erreur envoi image à " + username);
-            }
+            } catch (Exception e) { log("Erreur envoi image à " + username); }
+        }
+
+        public void sendFile(byte[] fileData, String fileName, String sender) {
+            try {
+                out.writeUTF("FILE_FROM:" + sender + ":" + fileName);
+                out.writeInt(fileData.length);
+                out.write(fileData);
+                out.flush();
+            } catch (Exception e) { log("Erreur envoi fichier à " + username); }
         }
 
         @Override
@@ -118,31 +113,23 @@ public class chatServer {
                 updateUsersList();
 
                 while (true) {
-
                     String header = in.readUTF();
                     log("Reçu: " + header);
 
+                    // Privé
                     if (header.startsWith("PRIV:")) {
-                        String[] p = header.split(":", 3);
-                        String dest = p[1];
-                        String msg = p[2];
-
-                        for (ClientHandler c : clients) {
-                            if (c.username.equals(dest)) {
-                                c.sendText("PRIV_FROM:" + username + ":" + msg);
-                            }
-                        }
-
+                        String[] p = header.split(":",3);
+                        String dest = p[1], msg = p[2];
+                        for (ClientHandler client : clients)
+                            if (client.username.equals(dest)) client.sendText("PRIV_FROM:" + username + ":" + msg);
                         sendText("PRIV_SENT:" + dest + ":" + msg);
                         continue;
                     }
 
+                    // Image
                     if (header.startsWith("IMG:")) {
-
-                        String[] p = header.split(":", 3);
-                        String dest = p[1];
-                        String sender = p[2];
-
+                        String[] p = header.split(":",3);
+                        String dest = p[1], sender = p[2];
                         int size = in.readInt();
                         byte[] data = new byte[size];
                         in.readFully(data);
@@ -150,18 +137,38 @@ public class chatServer {
                         log("Image reçue (" + size + " octets)");
 
                         if (dest.equals("ALL")) {
-                            for (ClientHandler c : clients) {
-                                if (c != this) c.sendImage(data, sender);
-                            }
+                            for (ClientHandler client : clients)
+                                if (client != this) client.sendImage(data, sender);
                         } else {
-                            for (ClientHandler c : clients) {
-                                if (c.username.equals(dest))
-                                    c.sendImage(data, sender);
-                            }
+                            for (ClientHandler clientDest : clients)
+                                if (clientDest.username.equals(dest))
+                                    clientDest.sendImage(data, sender);
                         }
                         continue;
                     }
 
+                    // Fichier
+                    if (header.startsWith("FILE:")) {
+                        String[] p = header.split(":",3);
+                        String dest = p[1], fileName = p[2];
+                        int size = in.readInt();
+                        byte[] data = new byte[size];
+                        in.readFully(data);
+
+                        log("Fichier reçu : " + fileName + " (" + size + " octets)");
+
+                        if (dest.equals("ALL")) {
+                            for (ClientHandler client : clients)
+                                if (client != this) client.sendFile(data, fileName, username);
+                        } else {
+                            for (ClientHandler clientDest : clients)
+                                if (clientDest.username.equals(dest))
+                                    clientDest.sendFile(data, fileName, username);
+                        }
+                        continue;
+                    }
+
+                    // Message public
                     broadcastText(username + " : " + header, this);
                 }
 
