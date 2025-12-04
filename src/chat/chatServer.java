@@ -9,7 +9,6 @@ import java.awt.*;
 public class chatServer {
 
     private static ArrayList<ClientHandler> clients = new ArrayList<>();
-
     private static JFrame frame;
     private static JTextArea logArea;
 
@@ -39,15 +38,14 @@ public class chatServer {
     }
 
     private static void createGUI() {
-        frame = new JFrame("Serveur Chat TCP (Texte + Image + Fichier + Privé)");
+        frame = new JFrame("Serveur Chat TCP");
         frame.setSize(600, 500);
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 
         logArea = new JTextArea();
         logArea.setEditable(false);
-        JScrollPane scroll = new JScrollPane(logArea);
 
-        frame.add(scroll, BorderLayout.CENTER);
+        frame.add(new JScrollPane(logArea), BorderLayout.CENTER);
         frame.setVisible(true);
     }
 
@@ -73,9 +71,9 @@ public class chatServer {
         public String username;
 
         public ClientHandler(Socket socket) {
-            this.socket = socket;
             try {
-                in = new DataInputStream(socket.getInputStream());
+                this.socket = socket;
+                in  = new DataInputStream(socket.getInputStream());
                 out = new DataOutputStream(socket.getOutputStream());
             } catch (Exception e) {
                 log("Erreur init client : " + e.getMessage());
@@ -105,6 +103,15 @@ public class chatServer {
             } catch (Exception e) { log("Erreur envoi fichier à " + username); }
         }
 
+        public void sendAudio(byte[] audioData, String audioName, String sender) {
+            try {
+                out.writeUTF("AUDIO_FROM:" + sender + ":" + audioName);
+                out.writeInt(audioData.length);
+                out.write(audioData);
+                out.flush();
+            } catch (Exception e) { log("Erreur envoi audio à " + username); }
+        }
+
         @Override
         public void run() {
             try {
@@ -121,7 +128,8 @@ public class chatServer {
                         String[] p = header.split(":",3);
                         String dest = p[1], msg = p[2];
                         for (ClientHandler client : clients)
-                            if (client.username.equals(dest)) client.sendText("PRIV_FROM:" + username + ":" + msg);
+                            if (client.username.equals(dest))
+                                client.sendText("PRIV_FROM:" + username + ":" + msg);
                         sendText("PRIV_SENT:" + dest + ":" + msg);
                         continue;
                     }
@@ -129,20 +137,19 @@ public class chatServer {
                     // Image
                     if (header.startsWith("IMG:")) {
                         String[] p = header.split(":",3);
-                        String dest = p[1], sender = p[2];
+                        String dest   = p[1];
+                        String sender = p[2];
                         int size = in.readInt();
                         byte[] data = new byte[size];
                         in.readFully(data);
 
-                        log("Image reçue (" + size + " octets)");
-
                         if (dest.equals("ALL")) {
-                            for (ClientHandler client : clients)
-                                if (client != this) client.sendImage(data, sender);
+                            for (ClientHandler c : clients)
+                                if (c != this) c.sendImage(data, sender);
                         } else {
-                            for (ClientHandler clientDest : clients)
-                                if (clientDest.username.equals(dest))
-                                    clientDest.sendImage(data, sender);
+                            for (ClientHandler c : clients)
+                                if (c.username.equals(dest))
+                                    c.sendImage(data, sender);
                         }
                         continue;
                     }
@@ -150,20 +157,39 @@ public class chatServer {
                     // Fichier
                     if (header.startsWith("FILE:")) {
                         String[] p = header.split(":",3);
-                        String dest = p[1], fileName = p[2];
+                        String dest     = p[1];
+                        String fileName = p[2];
                         int size = in.readInt();
                         byte[] data = new byte[size];
                         in.readFully(data);
 
-                        log("Fichier reçu : " + fileName + " (" + size + " octets)");
+                        if (dest.equals("ALL")) {
+                            for (ClientHandler c : clients)
+                                if (c != this) c.sendFile(data, fileName, username);
+                        } else {
+                            for (ClientHandler c : clients)
+                                if (c.username.equals(dest))
+                                    c.sendFile(data, fileName, username);
+                        }
+                        continue;
+                    }
+
+                    // Audio
+                    if (header.startsWith("AUDIO:")) {
+                        String[] p = header.split(":",3);
+                        String dest = p[1];
+                        String audioName = p[2];
+                        int size = in.readInt();
+                        byte[] data = new byte[size];
+                        in.readFully(data);
 
                         if (dest.equals("ALL")) {
-                            for (ClientHandler client : clients)
-                                if (client != this) client.sendFile(data, fileName, username);
+                            for (ClientHandler c : clients)
+                                if (c != this) c.sendAudio(data, audioName, username);
                         } else {
-                            for (ClientHandler clientDest : clients)
-                                if (clientDest.username.equals(dest))
-                                    clientDest.sendFile(data, fileName, username);
+                            for (ClientHandler c : clients)
+                                if (c.username.equals(dest))
+                                    c.sendAudio(data, audioName, username);
                         }
                         continue;
                     }
